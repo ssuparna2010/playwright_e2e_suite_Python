@@ -191,7 +191,7 @@ class BaseActions:
                 return await axe.run({
                     runOnly: {
                         type: 'tag',
-                        values: ['wcag2a', 'wcag2aa', 'best-practice']
+                        values: ['wcag2a', 'wcag2aa','wcag412', 'section508']
                     }
                 });
             }
