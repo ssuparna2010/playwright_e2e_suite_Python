@@ -20,12 +20,30 @@ class BaseActions:
             return self.page.locator(f"xpath={selector}")
         return self.page.locator(selector)
     
+    def element_not_visible(self, selector):
+        """Check if the element is hidden or does not exist on the page."""
+        try:
+            selector = selector.strip()
+            # Get the locator for the selector
+            locator = self.get_locator(selector)
+            # Check if the element is hidden
+            is_hidden = locator.is_hidden()
+
+            return is_hidden
+        except Exception as e:
+            return True  # Assume the element is not visible if an error occurs
+        
+                
     def get_expected_result(self, action, selector, input_value):
         """Dynamically generate the expected result based on action type."""
         if action == "Type":
             return f"Text '{input_value}' should be entered in {selector}"
         elif action == "Click":
             return f"Element {selector} should be clicked"
+        elif action == "checkelementexistence":
+            return f"Element {selector} should be exist"
+        elif action == "checkelementnotvisible":
+            return f"Element {selector} should not be exist"
         elif action == "Assert":
             return f"Element {selector} should be visible"
         elif action == "Title":
@@ -103,7 +121,21 @@ class BaseActions:
                 locator.wait_for(state="visible", timeout=5000)  # Wait for visibility
                 locator.fill(str(input_value))
                 actual_result = f"Typed '{input_value}' in {selector}"
+            
+            elif action.lower() == "checkelementexistence":
+                locator = self.get_locator(selector)
+                locator.wait_for(state="visible", timeout=5000)  # Wait for visibility
+                actual_result = f"Element {selector} exist"
 
+            elif action.lower() == "checkelementnotvisible":
+                locator = self.element_not_visible(selector)
+                if(locator):
+                    actual_result = f"Element {selector} not exist"
+                    isOK=0
+                else :
+                    actual_result = f"Element {selector} exist"
+                    isOK=1
+            
             elif action.lower() == "click":
                 locator = self.get_locator(selector)
                 locator.wait_for(state="visible", timeout=5000)  # Wait for visibility
