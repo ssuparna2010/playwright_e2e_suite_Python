@@ -101,7 +101,7 @@ def generate_html_report(test_results):
 
         for step in result["steps"]:
             status_class = "pass" if step["status"] == "Pass" else "fail"
-            screenshot = f"<a target='_blank' href={step.get('screenshot_path', '')}><img style='height: 30px;width: 35px;' src='../assets/image_upload_icons.png' alt='Screenshot'> </a>" if step.get("screenshot_path") else "No screenshot"
+            screenshot = f"<a target='_blank' href={step.get('screenshot_path', '')}><img style='height: 30px;width: 35px;' src='../assets/image_upload_icons.svg' alt='Screenshot'> </a>" if step.get("screenshot_path") else "No screenshot"
             detailed_html += f"""
                 <tr>
                     <td>{step['step_no']}</td>
