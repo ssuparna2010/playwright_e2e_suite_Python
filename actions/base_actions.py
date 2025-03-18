@@ -4,6 +4,7 @@ import time
 import os
 from datetime import datetime
 import json
+import requests
 
 class BaseActions:
     def __init__(self, page: Page, report_steps):
@@ -64,7 +65,71 @@ class BaseActions:
         self.page = frame
         print(f"Switched to frame at index {index}")
 
+    def validate_api_response(self, url, method="GET", headers=None, payload=None, expected_status=200, expected_responses=None):
+        """Validate API response based on the provided parameters."""
+        try:
+            headers = headers or {}
+            payload = payload or {}
 
+            # For API requests
+            if method.upper() == "GET":
+                response = requests.get(url, headers=headers)
+            elif method.upper() == "POST":
+                response = requests.post(url, headers=headers, json=payload)
+            else:
+                raise ValueError(f"Unsupported HTTP method: {method}")
+
+            # Validate the response code
+            assert response.status_code == expected_status, f"Expected status {expected_status}, got {response.status_code}"
+
+            # Validate the response
+            validation_results = []
+            if expected_responses:
+                for expected_response in expected_responses:
+                    key = expected_response.get("key")
+                    value = expected_response.get("value")
+                    operand = expected_response.get("operand", "equals")
+
+                    if operand == "equals":
+                        if self._find_key_value(response.json(), key, value):
+                            validation_results.append(f"""Validation passed: {key} equals {value}""")
+                        else:
+                            validation_results.append(f"\nValidation failed: {key} does not equal {value}")
+                    elif operand == "contains":
+                        if self._find_key_value(response.json(), key, value, contains=True):
+                            validation_results.append(f"\nValidation passed: {key} contains {value}")
+                        else:
+                            validation_results.append(f"\nValidation failed: {key} does not contain {value}")
+                    else:
+                        raise ValueError(
+                            f"Unsupported response validation operator in expected_response: {operand}."
+                            "Expected format: "
+                            '{"url": "<URL>", "method": "<GET|POST|PUT>", '
+                            '"headers": {<optional>}, "payload": {<optional>}, '
+                            '"expected_status": "<code>", '
+                            '"expected_responses": [{"key": "<key>", "value": "<value>", "operand": "<equals|contains>"}]}'
+                        )
+
+            return 0, f"API validation successful for {url}. Validation results: {', '.join(validation_results)}"
+        except Exception as e:
+            return 1, f"API validation failed for {url}: {str(e)}"
+
+    def _find_key_value(self, data, key, value, contains=False):
+        """Recursively find the key-value pair in the nested JSON data."""
+        if isinstance(data, dict):
+            if key in data:
+                if contains:
+                    return value in str(data[key])  # Check if value is contained in the data[key]
+                return data[key] == value  # Check if value matches exactly
+            for k, v in data.items():
+                if self._find_key_value(v, key, value, contains):
+                    return True
+        elif isinstance(data, list):
+            for item in data:
+                if self._find_key_value(item, key, value, contains):
+                    return True
+        return False
+    
     def switch_to_frame_by_selector(self, selector):
         """Switch to the iframe specified by the selector"""
         frame_locator = self.page.frame_locator(selector)
@@ -86,9 +151,6 @@ class BaseActions:
             raise Exception(f"Iframe '{iframe_selector}' not found in shadow root")
         self.page = iframe.content_frame()
         print(f"Switched to iframe '{iframe_selector}' inside shadow root '{shadow_host_selector}'")
-        # Print the HTML content of the iframe
-        frame_content = self.page.content()
-        print(frame_content)
 
     def switch_to_main_frame(self):
         """Switch back to the main frame"""
@@ -196,6 +258,29 @@ class BaseActions:
                 report_path,isOK = self.perform_accessibility_check()
                 print(f"reportPath{report_path} and isOK is {isOK}")
                 actual_result = f"Performed accessibility check. <a href='{report_path}' target='_blank'>Accessibility Report</a>"
+            
+            elif action.lower() == "validateapiresponse":
+                try:
+                    input_data = json.loads(input_value)
+                except ValueError as e:
+                    isOK = 1  # Mark step as failed
+                    actual_result = (
+                        f"Invalid JSON input for API validation: {input_value}. "
+                        "Expected format: "
+                        '{"url": "<URL>", "method": "<GET|POST|PUT>", '
+                        '"headers": {<optional>}, "payload": {<optional>}, '
+                        '"expected_status": "<code>", '
+                        '"expected_responses": [{"key": "<key>", "value": "<value>", "operand": "<equals|contains>"}]}'
+                    )
+                    raise Exception(actual_result)
+                
+                url = input_data.get("url")
+                method = input_data.get("method", "GET")
+                headers = input_data.get("headers", None)
+                payload = input_data.get("payload", None)
+                expected_status = input_data.get("expected_status")
+                expected_responses = input_data.get("expected_response")
+                isOK, actual_result = self.validate_api_response(url, method, headers, payload, expected_status, expected_responses)
 
         except Exception as e:
             isOK = 1  # Mark step as failed
