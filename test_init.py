@@ -77,7 +77,7 @@ def test_run_test_cases(test_case_id, record_testsuite_property, page):
         step_isOK = 0  # Initialize step_isOK
 
         try:
-            if action.lower() == "launchbrowser":
+            if action.lower() == "launchapplication":
                 logger.info(f"Navigating to URL: {selector}")
                 page.goto(selector)
                 actual_result = f"Navigated to '{selector}'"
@@ -137,3 +137,4 @@ def test_run_test_cases(test_case_id, record_testsuite_property, page):
     # Fail the test if isOK is 1
     if isOK == 1:
         pytest.fail(f"Test case {test_case_id} failed due to one or more step failures.")
+
