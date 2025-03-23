@@ -1,17 +1,20 @@
 from playwright.sync_api import Page, expect
-import pytest
 import time
 import os
 from datetime import datetime
 import json
+import pandas as pd
 import requests
+from .custom_transact_action import CustomTransactActions
+from utils.ai_evaluator import calculate_cosine_similarity
 
 class BaseActions:
     def __init__(self, page: Page, report_steps):
         self.page = page
+        self.main_page = page  # Initialize main_page attribute
         self.report_steps = report_steps  # Store test steps
-        self.main_page = page  # Store reference to the main page
-        
+        self.custom_actions = CustomTransactActions(page, report_steps)  # Initialize custom actions
+
     def get_locator(self, selector):
         """Detect whether the selector is XPath or CSS"""
         if not isinstance(selector, str):
@@ -20,7 +23,7 @@ class BaseActions:
         if selector.startswith("//") or selector.startswith("("):
             return self.page.locator(f"xpath={selector}")
         return self.page.locator(selector)
-    
+
     def element_not_visible(self, selector):
         """Check if the element is hidden or does not exist on the page."""
         try:
@@ -37,24 +40,39 @@ class BaseActions:
                 
     def get_expected_result(self, action, selector, input_value):
         """Dynamically generate the expected result based on action type."""
-        if action == "Type":
-            return f"Text '{input_value}' should be entered in {selector}"
-        elif action == "Click":
-            return f"Element {selector} should be clicked"
+        final_selector = self.final_selector(selector)
+        action = action.lower()  # Convert action to lower case for case-insensitive comparison
+
+        if action == "setinputintextfield":
+            return f"Text '{input_value}' should be entered in {final_selector}"
+        elif action == "clickelement":
+            return f"Element {final_selector} should be clicked"
         elif action == "checkelementexistence":
-            return f"Element {selector} should be exist"
+            return f"Element {final_selector} should exist"
         elif action == "checkelementnotvisible":
-            return f"Element {selector} should not be exist"
-        elif action == "Assert":
-            return f"Element {selector} should be visible"
-        elif action == "Title":
-            return f"Page title should be '{input_value}'"
-        elif action == "Wait":
-            return f"Wait for {input_value}ms"
-        elif action == "WaitForElementExist":
-            return f"Element {selector} should exist within {input_value}ms"
+            return f"Element {final_selector} should not exist"
+        elif action == "checkelementcontaintext":
+            return f"Element {final_selector} should contain text '{input_value}'"
+        elif action == "title":
+            return f"Page title should be '{final_selector}'"
+        elif action == "timedelay":
+            return f"Wait for {input_value}s"
+        elif action == "waitforelementexist":
+            return f"Element {final_selector} should exist within {input_value}s"
+        elif action == "checkelementenabled":
+            return f"Element {final_selector} should be enabled"
+        elif action == "clickelementcontaintextoption":
+            return f"Element {final_selector} should be clicked which is having text '{input_value}'"
+        elif action == "clickfindbutton":
+            return f"Find button should be clicked"
+        elif action == "checkelementnotvisiblexpath":
+            return f"Element {final_selector} should not be visible"
+        elif action == "checkelementcontainstextexistence":
+            return f"Element {selector.get('child_locator1')} should contain text '{input_value}'"
+        elif action == "checkelementcontainstoredtext":
+            return f"Element {selector.get('child_locator1')} should contain stored text from data store"
         else:
-            return f"Action '{action}' executed successfully"
+            return f"For action '{action}' please validate objectMap"
 
     def switch_to_frame_by_index(self, index):
         """Switch to the iframe specified by the index"""
@@ -169,72 +187,131 @@ class BaseActions:
             if element is None:
                 raise Exception(f"Element '{selector}' not found in shadow DOM")
         return element
+    def final_selector(self, selector):
+        """Construct the final selector based on the provided locators"""
+        if isinstance(selector, dict):
+            final_selector = selector.get("locator", "")
+            if "parent_locator" in selector and pd.notna(selector["parent_locator"]):
+                final_selector = selector["parent_locator"]
+                if "child_locator1" in selector and pd.notna(selector["child_locator1"]):
+                    final_selector += " >> " + selector["child_locator1"]
+                    if "child_locator2" in selector and pd.notna(selector["child_locator2"]):
+                        final_selector += " >> " + selector["child_locator2"]
+                        if "child_locator3" in selector and pd.notna(selector["child_locator3"]):
+                            final_selector += " >> " + selector["child_locator3"]
+        else:
+            final_selector = selector
+        return final_selector
+    def final_xpath_selector(self, selector):
+        """Construct the final selector based on the provided locators"""
+        if isinstance(selector, dict):
+            final_selector = selector.get("locator", "")
+            if "parent_locator" in selector and pd.notna(selector["parent_locator"]):
+                final_selector = selector["parent_locator"]
+        else:
+            final_selector = selector
+        return final_selector
 
-    def perform_action(self, step_no, step_desc, expected_result, action, selector, input_value=None):
+    def perform_action(self, step_no, step_desc, expected_result, action, selector, input_value=None,optional_data=None, propertyname=None,):
         """Perform action based on test script and log failures if element not found"""
         start_time = time.time()
         isOK = 0  # 0 = Success, 1 = Failure
         actual_result = ""
         screenshot_path = None  # Store screenshot if failure occurs
-        
+        final_selector = self.final_selector(selector)   
+
         try:
-            if action.lower() == "type":
-                locator = self.get_locator(selector)
+            action = action.lower()  # Convert action to lower case for case-insensitive comparison
+
+            if action == "setinputintextfield":
+                locator = self.get_locator(final_selector)
                 locator.wait_for(state="visible", timeout=5000)  # Wait for visibility
                 locator.fill(str(input_value))
-                actual_result = f"Typed '{input_value}' in {selector}"
+                actual_result = f"Typed '{input_value}' in {final_selector}"
             
-            elif action.lower() == "checkelementexistence":
-                locator = self.get_locator(selector)
+            elif action == "checkelementexistence":
+                locator = self.get_locator(final_selector)
                 locator.wait_for(state="visible", timeout=5000)  # Wait for visibility
-                actual_result = f"Element {selector} exist"
+                actual_result = f"Element {final_selector} exists"
 
-            elif action.lower() == "checkelementnotvisible":
-                locator = self.element_not_visible(selector)
-                if(locator):
-                    actual_result = f"Element {selector} not exist"
-                    isOK=0
-                else :
-                    actual_result = f"Element {selector} exist"
-                    isOK=1
+            elif action == "checkelementnotvisible":
+                locator = self.element_not_visible(final_selector)
+                if locator:
+                    actual_result = f"Element {final_selector} does not exist"
+                    isOK = 0
+                else:
+                    actual_result = f"Element {final_selector} exists"
+                    isOK = 1
             
-            elif action.lower() == "click":
-                locator = self.get_locator(selector)
+            elif action == "clickelement":
+                locator = self.get_locator(final_selector)
                 locator.wait_for(state="visible", timeout=5000)  # Wait for visibility
                 locator.click()
-                actual_result = f"Clicked on {selector}"
+                actual_result = f"Clicked on {final_selector}"
 
-            elif action.lower() == "assert":
-                if selector == "title":
-                    assert self.page.title() == input_value, f"Expected '{input_value}', got '{self.page.title()}'"
+            elif action == "checkelementcontaintext":
+                if final_selector == "title":
+                    assert self.page.title().to_contain_text(input_value) , f"Expected '{input_value}', got '{self.page.title()}'"
                     actual_result = f"Page title matched: {input_value}"
                 else:
-                    locator = self.get_locator(selector)
-                    expect(locator).to_have_text(input_value, timeout=5000)
-                    actual_result = f"Verified text '{input_value}' in {selector}"
+                    locator = self.get_locator(final_selector)
+                    expect(locator).to_contain_text(input_value, timeout=5000)
+                    actual_result = f"Verified text '{input_value}' in {final_selector}"
                     
-            elif action.lower() == "wait":
-                self.page.wait_for_timeout(int(input_value))  # Convert input to integer (milliseconds)
-                actual_result = f"Waited for {input_value}ms"
+            elif action == "timedelay":
+                delay = float(input_value * 1000)  # Convert to milliseconds
+                self.page.wait_for_timeout(int(delay))  # Playwright expects milliseconds
+                actual_result = f"Waited for {input_value}s"
+            
+            elif action == "clickelementcontaintextoption":
+                print("final_selector", final_selector)
+                locator = self.get_locator(final_selector).filter(has_text=input_value)
+                locator.wait_for(state="visible", timeout=50000)  # Wait for visibility
+                locator.click(force=True)  # Click the element with force
+                actual_result = f"Clicked on element {final_selector} containing text '{input_value}'"
 
-            elif action.lower() == "switchtoframe":
-                if selector.isdigit():
-                    self.switch_to_frame_by_index(int(selector))
+            elif action == "cosine_similarity":
+                #locator = self.get_locator(final_selector)
+                #locator.wait_for(state="visible", timeout=50000) 
+                #extracted_response_text = locator.inner_text()
+                SIMILARITY_THRESHOLD = 0.3
+                extracted_response_text = "AI stands for Artificial Intelligence"
+                print("\nsimilarity starts",extracted_response_text,"\nexpected", input_value)
+                similarity_score  =  calculate_cosine_similarity(extracted_response_text,input_value)
+                stepIsOK = similarity_score >= SIMILARITY_THRESHOLD
+
+                if stepIsOK:
+                    isOK=0
+                    actual_result = f"Extracted responses and passed to cosine_similarity. Result: {similarity_score}"
                 else:
-                    self.switch_to_frame_by_selector(selector)
-                actual_result = f"Switched to frame with selector '{selector}'"
+                    isOK = 1  # Mark step as failed
+                    actual_result = f"Error in evaluation: {similarity_score}"
+                
+                return isOK, actual_result
+            
+            elif action == "clickelementxpath":
+                locator = self.page.locator(f"xpath={final_selector}")
+                locator.click(force=True)  # Click the element with force
+                actual_result = f"Clicked on element {final_selector}"
+                
+            elif action == "switchtoframe":
+                if final_selector.isdigit():
+                    self.switch_to_frame_by_index(int(final_selector))
+                else:
+                    self.switch_to_frame_by_selector(final_selector)
+                actual_result = f"Switched to frame with selector '{final_selector}'"
 
-            elif action.lower() == "switchtoframebyshadowselector":
-                shadow_host_selector, iframe_selector = selector.split(">>")
+            elif action == "switchtoframebyshadowselector":
+                shadow_host_selector, iframe_selector = final_selector.split(">>")
                 self.switch_to_frame_in_shadow_root(shadow_host_selector.strip(), iframe_selector.strip())
-                actual_result = f"Switched to frame inside shadow root with selector '{selector}'"
+                actual_result = f"switched to frame Successfully"
 
-            elif action.lower() == "switchtomainframe":
+            elif action == "switchtomainframe":
                 self.switch_to_main_frame()
                 actual_result = f"Switched back to main frame"
 
-            elif action.lower() == "clickshadow":
-                selectors = selector.split(">>")
+            elif action == "clickshadow":
+                selectors = final_selector.split(">>")
                 shadow_root = self.page.query_selector(selectors[0])
                 if shadow_root is None:
                     raise Exception(f"Element '{selectors[0]}' not found")
@@ -247,19 +324,45 @@ class BaseActions:
                 if shadow_element is None:
                     raise Exception(f"Element '{selectors[-1]}' not found in shadow DOM")
                 shadow_element.click()
-                actual_result = f"Clicked on nested shadow DOM element {selectors[-1]} inside {selector}"
+                actual_result = f"Clicked on nested shadow DOM element {selectors[-1]} inside {final_selector}"
 
-            elif action.lower() == "waitforelementexist":
-                locator = self.get_locator(selector)
+            elif action == "waitforelementexist":
+                locator = self.get_locator(final_selector)
                 locator.wait_for(state="attached", timeout=int(input_value))
-                actual_result = f"Element {selector} exists within {input_value}ms"
+                actual_result = f"Element {final_selector} exists within {input_value}s"
 
-            elif action.lower() == "accessibilitycheck":
-                report_path,isOK = self.perform_accessibility_check()
+            elif action == "checkelementenabled":
+                locator = self.get_locator(final_selector)
+                expect(locator).to_be_enabled(timeout=90000)  # Check if the element is enabled
+                actual_result = f"Element {final_selector} is enabled"
+
+            elif action == "checkelementnotvisiblexpath":
+                locator = self.page.locator(f"xpath={final_selector}")
+                expect(locator).not_to_be_visible(timeout=90000)  # Check if the element is not visible
+                actual_result = f"Element {final_selector} is not visible"
+
+            elif action == "checkelementcontainstextexistence":
+                parent_locator = self.get_locator(selector.get("parent_locator"))
+                child_locator = parent_locator.locator(selector.get("child_locator1"))
+                expect(child_locator).to_contain_text(input_value, timeout=90000)  # Check if the element contains the text
+                actual_result = f"Element {selector.get('child_locator1')} contains text '{input_value}'"
+
+            elif action == "checkelementcontainstoredtext":
+                with open('runTimeData/dataStore.json', 'r') as file:
+                    json_data = json.load(file)
+                    assert input_value in json_data, f"Expected key '{input_value}' not found in data store"
+                    stored_text = json_data[input_value]
+                    parent_locator = self.get_locator(selector.get("parent_locator"))
+                    child_locator = parent_locator.locator(selector.get("child_locator1"))
+                    expect(child_locator).to_contain_text(stored_text, timeout=90000)  # Check if the element contains the stored text
+                    actual_result = f"Element {selector.get('child_locator1')} contains stored text '{stored_text}'"
+
+            elif action == "accessibilitycheck":
+                report_path, isOK = self.perform_accessibility_check()
                 print(f"reportPath{report_path} and isOK is {isOK}")
                 actual_result = f"Performed accessibility check. <a href='{report_path}' target='_blank'>Accessibility Report</a>"
             
-            elif action.lower() == "validateapiresponse":
+            elif action == "validateapiresponse":
                 try:
                     input_data = json.loads(input_value)
                 except ValueError as e:
@@ -281,6 +384,9 @@ class BaseActions:
                 expected_status = input_data.get("expected_status")
                 expected_responses = input_data.get("expected_response")
                 isOK, actual_result = self.validate_api_response(url, method, headers, payload, expected_status, expected_responses)
+            else:
+                # Delegate to CustomTransactActions if action is not found in BaseActions
+                return self.custom_actions.perform_action(step_no, step_desc, expected_result, action, selector, input_value)
 
         except Exception as e:
             isOK = 1  # Mark step as failed
@@ -290,7 +396,7 @@ class BaseActions:
         os.makedirs("reports/screenshots", exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         screenshot_path = f"reports/screenshots/{step_no}_{timestamp}.png"
-        self.main_page.screenshot(path=screenshot_path)  # Take screenshot from the main page
+        self.page.screenshot(path=screenshot_path)  # Take screenshot from the main page
         
         duration = round(time.time() - start_time, 2) 
         # Add step result to report
